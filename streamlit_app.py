@@ -68,7 +68,7 @@ def save_json(file, data):
     sync_to_github(file, data)
 
 # ─────────────────────────────────────────────
-# TELEGRAM (VISIBLE COMME DEMANDÉ)
+# TELEGRAM
 # ─────────────────────────────────────────────
 if "TOKEN_TELEGRAM" not in st.session_state:
     st.session_state["TOKEN_TELEGRAM"] = "8150058407:AAFg44ySihFKBO1UW69QZqi07otqeB2IK5s"
@@ -134,7 +134,7 @@ ASSETS = {
 }
 
 # ─────────────────────────────────────────────
-# MOTEUR PRINCIPAL — LOGIQUE 65 % (Filtre D1 intégré)
+# MOTEUR PRINCIPAL
 # ─────────────────────────────────────────────
 def run_engine():
     results = []
@@ -142,7 +142,6 @@ def run_engine():
 
     data_m15 = yf.download(tickers, period="7d", interval="15m", group_by="ticker", progress=False, threads=False)
     data_h1  = yf.download(tickers, period="30d", interval="1h", group_by="ticker", progress=False, threads=False)
-    # MODIF : Ajout données Daily pour filtre tendance de fond
     data_d1  = yf.download(tickers, period="200d", interval="1d", group_by="ticker", progress=False, threads=False)
 
     for category, symbols in ASSETS.items():
@@ -159,9 +158,14 @@ def run_engine():
                 high = float(df_m15["High"].iloc[-1])
                 low  = float(df_m15["Low"].iloc[-1])
 
+                # Initialisation par défaut pour affichage
+                signal = "ATTENDRE"
+                comment = "Analyse..."
+                sl = tp = rr = None
+
                 atr_m15 = AverageTrueRange(df_m15["High"], df_m15["Low"], df_m15["Close"], 14).average_true_range().iloc[-1]
 
-                # === CONTEXTE DAILY (FILTRE MAJEUR) ===
+                # === CONTEXTE DAILY ===
                 ema200_d1 = EMAIndicator(df_d1["Close"], 200).ema_indicator().iloc[-1]
                 daily_trend_up = close > ema200_d1
                 daily_trend_dn = close < ema200_d1
@@ -175,12 +179,7 @@ def run_engine():
                 trend_dn = close_h1 < ema200_h1 and ema50_h1 < ema200_h1
 
                 adx_h1 = ADXIndicator(df_h1["High"], df_h1["Low"], df_h1["Close"]).adx().iloc[-1]
-                if adx_h1 < 18 or adx_h1 > 35:
-                    continue
-
-                if not is_trading_session(category):
-                    continue
-
+                
                 # === EMA M15 ===
                 ema20_m15 = EMAIndicator(df_m15["Close"], 20).ema_indicator().iloc[-1]
                 ema50_m15 = EMAIndicator(df_m15["Close"], 50).ema_indicator().iloc[-1]
@@ -192,22 +191,31 @@ def run_engine():
                 bullish_rejection = close > open_ and (close - low) / (high - low + 1e-6) > 0.6
                 bearish_rejection = close < open_ and (high - close) / (high - low + 1e-6) > 0.6
 
-                signal = "ATTENDRE"
-                sl = tp = rr = None
-
-                # MODIF : Intégration daily_trend_up et SL plus large (0.8 ATR)
-                if trend_up and daily_trend_up and pullback_buy and bullish_rejection:
-                    signal = "ACHAT 🚀"
-                    lowest_pullback = df_m15["Low"].iloc[-5:].min()
-                    sl = lowest_pullback - atr_m15 * 0.8
-                    tp = close + (close - sl) * 1.2
-
-                # MODIF : Intégration daily_trend_dn et SL plus large (0.8 ATR)
-                if trend_dn and daily_trend_dn and pullback_sell and bearish_rejection:
-                    signal = "VENTE 🔻"
-                    highest_pullback = df_m15["High"].iloc[-5:].max()
-                    sl = highest_pullback + atr_m15 * 0.8
-                    tp = close - (sl - close) * 1.2
+                # LOGIQUE DE DÉCISION (SANS FILTRE BLOQUANT)
+                if not is_trading_session(category):
+                    comment = "Hors session"
+                elif adx_h1 < 18 or adx_h1 > 35:
+                    comment = f"ADX Faible/Fort ({round(adx_h1,1)})"
+                elif trend_up and daily_trend_up:
+                    if pullback_buy and bullish_rejection:
+                        signal = "ACHAT 🚀"
+                        comment = "Pullback + Daily OK"
+                        lowest_pullback = df_m15["Low"].iloc[-5:].min()
+                        sl = lowest_pullback - atr_m15 * 0.8
+                        tp = close + (close - sl) * 1.2
+                    else:
+                        comment = "Attente Pullback Haussier"
+                elif trend_dn and daily_trend_dn:
+                    if pullback_sell and bearish_rejection:
+                        signal = "VENTE 🔻"
+                        comment = "Pullback + Daily OK"
+                        highest_pullback = df_m15["High"].iloc[-5:].max()
+                        sl = highest_pullback + atr_m15 * 0.8
+                        tp = close - (sl - close) * 1.2
+                    else:
+                        comment = "Attente Pullback Baissier"
+                else:
+                    comment = "Tendance D1/H1 non alignée"
 
                 if signal != "ATTENDRE":
                     rr = abs(tp - close) / abs(close - sl)
@@ -219,34 +227,27 @@ def run_engine():
                     "Catégorie": category,
                     "Signal": signal,
                     "Fiabilité": "🟢 High Winrate" if signal != "ATTENDRE" else "-",
-                    "Score": "-",
                     "Prix": round(close, 2 if category=="CRYPTO" else 5),
                     "SL Prix": round(sl,5) if sl else "-",
                     "SL Pips": round(abs(close-sl)*factor,1) if sl else "-",
                     "TP Prix": round(tp,5) if tp else "-",
                     "TP Pips": round(abs(tp-close)*factor,1) if tp else "-",
-                    "Commentaire": "Pullback confirmé + Alignement Daily"
+                    "Commentaire": comment
                 })
 
                 if signal in ["ACHAT 🚀", "VENTE 🔻"] and name not in active_trades:
                     active_trades[name] = {
-                        "type": signal,
-                        "entry": round(close,5),
-                        "sl": round(sl,5),
-                        "tp": round(tp,5),
-                        "rr": round(rr,2),
-                        "timestamp": datetime.datetime.now().isoformat()
+                        "type": signal, "entry": round(close,5), "sl": round(sl,5), "tp": round(tp,5), "rr": round(rr,2), "timestamp": datetime.datetime.now().isoformat()
                     }
                     save_json(DB_FILE, active_trades)
                     send_telegram_msg(f"🦅 SNIPER V17.1\n{name} {signal}\nAlignement: H1+D1 OK\nEntry: {close}\nSL: {sl}\nTP: {tp}\nRR: {round(rr,2)}")
 
             except:
                 continue
-
     return results
 
 # ─────────────────────────────────────────────
-# AFFICHAGE (IDENTIQUE)
+# AFFICHAGE
 # ─────────────────────────────────────────────
 st.title("🦅 Sniper V17.1 — High Winrate Engine")
 
@@ -275,7 +276,6 @@ with st.sidebar:
     if st.button("🗑 Réinitialiser Verrous"):
         if os.path.exists(DB_FILE): os.remove(DB_FILE)
         st.success("Verrous supprimés")
-
     if st.button("🔴 Effacer Historique"):
         if os.path.exists(HISTORY_FILE): os.remove(HISTORY_FILE)
         st.success("Historique vidé")
