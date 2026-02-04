@@ -85,10 +85,6 @@ def send_telegram_msg(message):
     except:
         pass
 
-if st.button("📩 Test Telegram"):
-    send_telegram_msg("✅ Test Telegram réussi depuis Sniper V17.1")
-    st.success("Message envoyé")
-
 # ─────────────────────────────────────────────
 # SESSION TRADING
 # ─────────────────────────────────────────────
@@ -158,6 +154,27 @@ def run_engine():
                 high = float(df_m15["High"].iloc[-1])
                 low  = float(df_m15["Low"].iloc[-1])
 
+                # --- GESTION DES SORTIES (POUR L'HISTORIQUE) ---
+                if name in active_trades:
+                    trade = active_trades[name]
+                    is_win, is_loss = False, False
+                    if trade["type"] == "ACHAT 🚀":
+                        if close >= trade["tp"]: is_win = True
+                        elif close <= trade["sl"]: is_loss = True
+                    else:
+                        if close <= trade["tp"]: is_win = True
+                        elif close >= trade["sl"]: is_loss = True
+                    
+                    if is_win or is_loss:
+                        history_trades.append({
+                            "Date": datetime.datetime.now().strftime("%d/%m %H:%M"),
+                            "Actif": name, "Type": trade["type"], "Résultat": "✅ WIN" if is_win else "❌ LOSS", "RR": trade["rr"] if is_win else -1.0
+                        })
+                        save_json(HISTORY_FILE, history_trades)
+                        del active_trades[name]
+                        save_json(DB_FILE, active_trades)
+                    continue 
+
                 # Initialisation par défaut pour affichage
                 signal = "ATTENDRE"
                 comment = "Analyse..."
@@ -191,7 +208,7 @@ def run_engine():
                 bullish_rejection = close > open_ and (close - low) / (high - low + 1e-6) > 0.6
                 bearish_rejection = close < open_ and (high - close) / (high - low + 1e-6) > 0.6
 
-                # LOGIQUE DE DÉCISION (SANS FILTRE BLOQUANT)
+                # LOGIQUE DE DÉCISION
                 if not is_trading_session(category):
                     comment = "Hors session"
                 elif adx_h1 < 18 or adx_h1 > 35:
@@ -264,15 +281,18 @@ if history_trades:
     col2.metric("Trades Clôturés", total_trades)
     col3.metric("Gain Cumulé (RR)", f"{round(total_rr,2)} R")
 
-    with st.expander("Voir le détail"):
-        st.table(df_hist.tail(10))
+    with st.expander("Voir le détail historique"):
+        st.table(df_hist.tail(15))
 
 st.header("🎯 Signaux en Direct")
-data = run_engine()
-if data:
-    st.dataframe(pd.DataFrame(data), use_container_width=True)
+data_results = run_engine()
+if data_results:
+    st.dataframe(pd.DataFrame(data_results), use_container_width=True)
 
 with st.sidebar:
+    if st.button("📩 Test Telegram"):
+        send_telegram_msg("✅ Test Telegram réussi depuis Sniper V17.1")
+        st.success("Message envoyé")
     if st.button("🗑 Réinitialiser Verrous"):
         if os.path.exists(DB_FILE): os.remove(DB_FILE)
         st.success("Verrous supprimés")
