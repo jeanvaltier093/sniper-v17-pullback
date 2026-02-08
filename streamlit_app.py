@@ -111,6 +111,7 @@ def pip_factor(pair):
 st.set_page_config(page_title="Sniper V17.1 — High Winrate Engine", layout="wide")
 st_autorefresh(interval=180000, key="refresh")
 
+# Chargement initial
 active_trades = load_json(DB_FILE)
 history_trades = load_json(HISTORY_FILE)
 
@@ -166,11 +167,13 @@ def run_engine():
                         elif close >= trade["sl"]: is_loss = True
                     
                     if is_win or is_loss:
-                        history_trades.append({
+                        # Re-charger l'historique avant d'ajouter pour éviter les pertes
+                        current_hist = load_json(HISTORY_FILE)
+                        current_hist.append({
                             "Date": datetime.datetime.now().strftime("%d/%m %H:%M"),
                             "Actif": name, "Type": trade["type"], "Résultat": "✅ WIN" if is_win else "❌ LOSS", "RR": trade["rr"] if is_win else -1.0
                         })
-                        save_json(HISTORY_FILE, history_trades)
+                        save_json(HISTORY_FILE, current_hist)
                         del active_trades[name]
                         save_json(DB_FILE, active_trades)
                     continue 
@@ -268,9 +271,12 @@ def run_engine():
 # ─────────────────────────────────────────────
 st.title("🦅 Sniper V17.1 — High Winrate Engine")
 
-# --- BLOC HISTORIQUE (TOUJOURS VISIBLE) ---
+# --- BLOC HISTORIQUE ---
 st.header("📊 Historique de Performance")
-df_hist = pd.DataFrame(history_trades)
+
+# On force la relecture du fichier à chaque cycle d'affichage pour la persistance
+hist_to_show = load_json(HISTORY_FILE)
+df_hist = pd.DataFrame(hist_to_show)
 
 if not df_hist.empty:
     win_count = len(df_hist[df_hist["Résultat"] == "✅ WIN"])
@@ -284,9 +290,9 @@ if not df_hist.empty:
     col3.metric("Gain Cumulé (RR)", f"{round(total_rr,2)} R")
 
     with st.expander("Voir le détail historique", expanded=True):
-        st.table(df_hist.tail(15))
+        st.table(df_hist.tail(20))
 else:
-    st.info("Aucun historique disponible pour le moment.")
+    st.info("En attente de clôture de trades ou chargement de l'historique...")
 
 # --- BLOC SIGNAUX ---
 st.header("🎯 Signaux en Direct")
@@ -302,5 +308,7 @@ with st.sidebar:
         if os.path.exists(DB_FILE): os.remove(DB_FILE)
         st.success("Verrous supprimés")
     if st.button("🔴 Effacer Historique"):
-        if os.path.exists(HISTORY_FILE): os.remove(HISTORY_FILE)
+        if os.path.exists(HISTORY_FILE): 
+            os.remove(HISTORY_FILE)
+            save_json(HISTORY_FILE, []) # Recrée un fichier vide propre
         st.success("Historique vidé")
