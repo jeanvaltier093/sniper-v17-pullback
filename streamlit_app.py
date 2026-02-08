@@ -268,9 +268,11 @@ def run_engine():
 # ─────────────────────────────────────────────
 st.title("🦅 Sniper V17.1 — High Winrate Engine")
 
-if history_trades:
-    st.header("📊 Historique de Performance")
-    df_hist = pd.DataFrame(history_trades)
+# --- BLOC HISTORIQUE (TOUJOURS VISIBLE) ---
+st.header("📊 Historique de Performance")
+df_hist = pd.DataFrame(history_trades)
+
+if not df_hist.empty:
     win_count = len(df_hist[df_hist["Résultat"] == "✅ WIN"])
     total_trades = len(df_hist)
     winrate = (win_count / total_trades * 100) if total_trades > 0 else 0
@@ -281,9 +283,12 @@ if history_trades:
     col2.metric("Trades Clôturés", total_trades)
     col3.metric("Gain Cumulé (RR)", f"{round(total_rr,2)} R")
 
-    with st.expander("Voir le détail historique"):
+    with st.expander("Voir le détail historique", expanded=True):
         st.table(df_hist.tail(15))
+else:
+    st.info("Aucun historique disponible pour le moment.")
 
+# --- BLOC SIGNAUX ---
 st.header("🎯 Signaux en Direct")
 data_results = run_engine()
 if data_results:
