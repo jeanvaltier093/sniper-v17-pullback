@@ -40,9 +40,10 @@ def sync_to_github(file_path, data):
         if sha:
             payload["sha"] = sha
 
-        requests.put(url, headers=headers, json=payload)
-    except:
-        pass
+        put_res = requests.put(url, headers=headers, json=payload)
+        return put_res # Retourné pour le diagnostic
+    except Exception as e:
+        return str(e)
 
 # ─────────────────────────────────────────────
 # GESTION DES FICHIERS & BASE DE DONNÉES LOCALES
@@ -72,7 +73,7 @@ def save_json(file, data):
         st.session_state["active_trades"] = data
     else:
         st.session_state["history_trades"] = data
-    sync_to_github(file, data)
+    return sync_to_github(file, data)
 
 # Initialisation Session State pour éviter les doublons au rafraîchissement
 if "active_trades" not in st.session_state:
@@ -337,6 +338,23 @@ with st.spinner("Analyse du marché en cours..."):
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.subheader("Paramètres & Maintenance")
+    
+    # --- BOUTON TEST CONNEXION GITHUB ---
+    if st.button("🔧 Forcer Test Connexion GitHub"):
+        try:
+            test_data = {"test_date": datetime.datetime.now().isoformat(), "status": "Connexion Active"}
+            result = save_json("test_connection.json", test_data)
+            
+            if isinstance(result, requests.Response):
+                if result.status_code in [200, 201]:
+                    st.success("✅ SUCCESS ! Fichier créé sur GitHub.")
+                else:
+                    st.error(f"❌ Erreur GitHub {result.status_code}: {result.text}")
+            else:
+                st.error(f"❌ Erreur Système : {result}")
+        except Exception as e:
+            st.error(f"❌ Erreur Critique : {e}")
+
     if st.button("📩 Test Telegram"):
         send_telegram_msg("✅ Test Telegram réussi depuis Sniper V17.1")
         st.success("Message envoyé")
